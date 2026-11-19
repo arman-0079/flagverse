@@ -1,0 +1,8 @@
+{
+  "name": "FLAGVERSE: WORLD CHALLENGE",
+  "description": "Explore the World. Master Every Flag. A 3D globe and multi-mode country, capital, map, and flag arcade game.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
