@@ -1,0 +1,200 @@
+{
+  "entities": {
+    "OnlineRoom": {
+      "title": "OnlineRoom",
+      "description": "Real-time 1v1 online multiplayer battle room for both Quick Match and Friend Code duels.",
+      "type": "object",
+      "properties": {
+        "roomId": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 32,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Unique room identifier (6-char Friend Code for friend rooms, or qm_XXXXXX for Quick Match)."
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["quick", "friend"],
+          "description": "Whether this room is a public Quick Match or a private Friend Code room."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["lobby", "starting", "playing", "finished"],
+          "description": "Lifecycle phase of the 1v1 match; finished is a locked terminal state."
+        },
+        "modeId": {
+          "type": "string",
+          "enum": ["flag-rush", "country-to-flag", "capital-duel", "true-false-blitz", "world-mix"],
+          "description": "Selected battle mode for the timed 1v1 match."
+        },
+        "wasRandomMode": {
+          "type": "boolean",
+          "description": "True when mode was randomly selected by Quick Match or Random Mode button."
+        },
+        "durationSeconds": {
+          "type": "integer",
+          "enum": [45, 60, 90],
+          "description": "Authoritative match duration in seconds."
+        },
+        "deckSeed": {
+          "type": "integer",
+          "description": "Deterministic PRNG seed shared by both players so both receive identical questions."
+        },
+        "hostUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID of the room creator (immutable)."
+        },
+        "hostName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 24,
+          "description": "Display name of the host player (no PII)."
+        },
+        "hostAvatar": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 4,
+          "pattern": "^[a-z]{2,4}$",
+          "description": "Country flag code used as the host avatar."
+        },
+        "guestUid": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 128,
+          "description": "Firebase Auth UID of the joining opponent/friend (empty string while waiting)."
+        },
+        "guestName": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 24,
+          "description": "Display name of the guest player (empty while waiting)."
+        },
+        "guestAvatar": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 4,
+          "description": "Country flag code used as the guest avatar (empty while waiting)."
+        },
+        "hostScore": {
+          "type": "integer",
+          "description": "Current cumulative score of the host player."
+        },
+        "hostCorrect": {
+          "type": "integer",
+          "description": "Number of correct answers submitted by the host."
+        },
+        "hostAnswered": {
+          "type": "integer",
+          "description": "Total answers submitted by the host."
+        },
+        "hostStreak": {
+          "type": "integer",
+          "description": "Active correct streak of the host."
+        },
+        "hostBestStreak": {
+          "type": "integer",
+          "description": "Highest streak achieved by the host in this match."
+        },
+        "hostQuestionIndex": {
+          "type": "integer",
+          "description": "Current question index reached by the host (0..60)."
+        },
+        "guestScore": {
+          "type": "integer",
+          "description": "Current cumulative score of the guest player."
+        },
+        "guestCorrect": {
+          "type": "integer",
+          "description": "Number of correct answers submitted by the guest."
+        },
+        "guestAnswered": {
+          "type": "integer",
+          "description": "Total answers submitted by the guest."
+        },
+        "guestStreak": {
+          "type": "integer",
+          "description": "Active correct streak of the guest."
+        },
+        "guestBestStreak": {
+          "type": "integer",
+          "description": "Highest streak achieved by the guest in this match."
+        },
+        "guestQuestionIndex": {
+          "type": "integer",
+          "description": "Current question index reached by the guest (0..60)."
+        },
+        "startedAtMs": {
+          "type": "integer",
+          "description": "Epoch timestamp in milliseconds when countdown started (0 while in lobby)."
+        },
+        "endsAtMs": {
+          "type": "integer",
+          "description": "Epoch timestamp in milliseconds when the timed battle ends (0 while in lobby)."
+        },
+        "winnerUid": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 128,
+          "description": "UID of the winner once finished, or empty string for draw/unfinished."
+        },
+        "finishReason": {
+          "type": "string",
+          "enum": ["", "time_up", "deck_completed", "opponent_left"],
+          "description": "Reason the match ended."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when room was created (immutable)."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the latest state transition."
+        }
+      },
+      "required": [
+        "roomId",
+        "kind",
+        "status",
+        "modeId",
+        "wasRandomMode",
+        "durationSeconds",
+        "deckSeed",
+        "hostUid",
+        "hostName",
+        "hostAvatar",
+        "guestUid",
+        "guestName",
+        "guestAvatar",
+        "hostScore",
+        "hostCorrect",
+        "hostAnswered",
+        "hostStreak",
+        "hostBestStreak",
+        "hostQuestionIndex",
+        "guestScore",
+        "guestCorrect",
+        "guestAnswered",
+        "guestStreak",
+        "guestBestStreak",
+        "guestQuestionIndex",
+        "startedAtMs",
+        "endsAtMs",
+        "winnerUid",
+        "finishReason",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/onlineRooms/{roomId}": {
+      "schema": { "$ref": "#/entities/OnlineRoom" },
+      "description": "Real-time 1v1 multiplayer match rooms (Quick Match and Friend Code lobbies)."
+    }
+  }
+}

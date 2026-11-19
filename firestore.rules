@@ -1,0 +1,318 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Pillar 0: Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ==================== GLOBAL HARDENED PRIMITIVES ====================
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 4 && id.size() <= 32 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidUid(uid) {
+      return uid is string && uid.size() >= 1 && uid.size() <= 128 && uid.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidOptionalUid(uid) {
+      return uid is string && (uid.size() == 0 || isValidUid(uid));
+    }
+
+    function isValidMode(modeId) {
+      return modeId in ['flag-rush', 'country-to-flag', 'capital-duel', 'true-false-blitz', 'world-mix'];
+    }
+
+    function isValidStatus(status) {
+      return status in ['lobby', 'starting', 'playing', 'finished'];
+    }
+
+    function isValidFinishReason(reason) {
+      return reason in ['', 'time_up', 'deck_completed', 'opponent_left'];
+    }
+
+    function isValidDuration(sec) {
+      return sec is int && sec in [45, 60, 90];
+    }
+
+    function isValidScore(val) {
+      return val is int && val >= 0 && val <= 50000;
+    }
+
+    function isValidCount(val) {
+      return val is int && val >= 0 && val <= 60;
+    }
+
+    function isValidAvatar(code) {
+      return code is string && code.size() >= 2 && code.size() <= 4 && code.matches('^[a-z]{2,4}$');
+    }
+
+    function isValidOptionalAvatar(code) {
+      return code is string && (code.size() == 0 || isValidAvatar(code));
+    }
+
+    function isValidRoomKeys(data) {
+      let allowedKeys = [
+        'roomId', 'kind', 'status', 'modeId', 'wasRandomMode', 'durationSeconds', 'deckSeed',
+        'hostUid', 'hostName', 'hostAvatar',
+        'guestUid', 'guestName', 'guestAvatar',
+        'hostScore', 'hostCorrect', 'hostAnswered', 'hostStreak', 'hostBestStreak', 'hostQuestionIndex',
+        'guestScore', 'guestCorrect', 'guestAnswered', 'guestStreak', 'guestBestStreak', 'guestQuestionIndex',
+        'startedAtMs', 'endsAtMs', 'winnerUid', 'finishReason',
+        'createdAt', 'updatedAt'
+      ];
+      return data.keys().hasAll(allowedKeys) && data.keys().hasOnly(allowedKeys);
+    }
+
+    function isValidOnlineRoom(data, roomId) {
+      return isValidId(roomId)
+        && isValidRoomKeys(data)
+        && data.roomId == roomId
+        && data.kind in ['quick', 'friend']
+        && isValidStatus(data.status)
+        && isValidMode(data.modeId)
+        && data.wasRandomMode is bool
+        && isValidDuration(data.durationSeconds)
+        && data.deckSeed is int && data.deckSeed >= 1 && data.deckSeed <= 2147483647
+        && isValidUid(data.hostUid)
+        && data.hostName is string && data.hostName.size() >= 1 && data.hostName.size() <= 24
+        && isValidAvatar(data.hostAvatar)
+        && isValidOptionalUid(data.guestUid)
+        && data.guestName is string && data.guestName.size() <= 24
+        && isValidOptionalAvatar(data.guestAvatar)
+        && isValidScore(data.hostScore)
+        && isValidCount(data.hostCorrect)
+        && isValidCount(data.hostAnswered)
+        && data.hostCorrect <= data.hostAnswered
+        && isValidCount(data.hostStreak)
+        && isValidCount(data.hostBestStreak)
+        && isValidCount(data.hostQuestionIndex)
+        && isValidScore(data.guestScore)
+        && isValidCount(data.guestCorrect)
+        && isValidCount(data.guestAnswered)
+        && data.guestCorrect <= data.guestAnswered
+        && isValidCount(data.guestStreak)
+        && isValidCount(data.guestBestStreak)
+        && isValidCount(data.guestQuestionIndex)
+        && data.startedAtMs is int && data.startedAtMs >= 0
+        && data.endsAtMs is int && data.endsAtMs >= 0
+        && (data.winnerUid == '' || data.winnerUid == data.hostUid || data.winnerUid == data.guestUid)
+        && isValidFinishReason(data.finishReason)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isRoomParticipant(data) {
+      return request.auth.uid == data.hostUid || (data.guestUid != '' && request.auth.uid == data.guestUid);
+    }
+
+    function areImmutableRoomFieldsUnchanged() {
+      return incoming().roomId == existing().roomId
+        && incoming().kind == existing().kind
+        && incoming().hostUid == existing().hostUid
+        && incoming().createdAt == existing().createdAt;
+    }
+
+    function isValidWinnerForFinish() {
+      return (
+        incoming().finishReason == 'opponent_left'
+        && incoming().winnerUid != request.auth.uid
+        && (incoming().winnerUid == existing().hostUid || incoming().winnerUid == existing().guestUid)
+      ) || (
+        incoming().finishReason in ['time_up', 'deck_completed']
+        && (
+          (existing().hostScore > existing().guestScore && incoming().winnerUid == existing().hostUid)
+          || (existing().guestScore > existing().hostScore && incoming().winnerUid == existing().guestUid)
+          || (existing().hostScore == existing().guestScore && incoming().winnerUid in ['', existing().hostUid, existing().guestUid])
+        )
+      );
+    }
+
+    // ==================== /onlineRooms/{roomId} ====================
+    match /onlineRooms/{roomId} {
+      // Direct get: participants can always read; verified users can fetch an open lobby room by exact code
+      allow get: if isVerifiedUser()
+        && isValidId(roomId)
+        && (
+          isRoomParticipant(existing())
+          || (existing().status == 'lobby' && existing().guestUid == '')
+        );
+
+      // Secure list query: ONLY open public Quick Match rooms or user's own rooms (never private Friend Rooms)
+      allow list: if isVerifiedUser()
+        && (
+          existing().hostUid == request.auth.uid
+          || existing().guestUid == request.auth.uid
+          || (existing().kind == 'quick' && existing().status == 'lobby' && existing().guestUid == '')
+        );
+
+      // Create: verified user creates a clean lobby room owned by themselves with server timestamps
+      allow create: if isVerifiedUser()
+        && isValidOnlineRoom(incoming(), roomId)
+        && incoming().hostUid == request.auth.uid
+        && incoming().status == 'lobby'
+        && incoming().guestUid == ''
+        && incoming().guestName == ''
+        && incoming().guestAvatar == ''
+        && incoming().hostScore == 0
+        && incoming().hostCorrect == 0
+        && incoming().hostAnswered == 0
+        && incoming().hostStreak == 0
+        && incoming().hostBestStreak == 0
+        && incoming().hostQuestionIndex == 0
+        && incoming().guestScore == 0
+        && incoming().guestCorrect == 0
+        && incoming().guestAnswered == 0
+        && incoming().guestStreak == 0
+        && incoming().guestBestStreak == 0
+        && incoming().guestQuestionIndex == 0
+        && incoming().startedAtMs == 0
+        && incoming().endsAtMs == 0
+        && incoming().winnerUid == ''
+        && incoming().finishReason == ''
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      // Update: Validation blueprint first, immutable fields locked, terminal state locked, partitioned by Action
+      allow update: if isVerifiedUser()
+        && isValidOnlineRoom(incoming(), roomId)
+        && areImmutableRoomFieldsUnchanged()
+        && existing().status != 'finished'
+        && incoming().updatedAt == request.time
+        && (
+          // Action 1A: Friend joins an open Friend Room lobby
+          (
+            existing().kind == 'friend'
+            && existing().status == 'lobby'
+            && existing().guestUid == ''
+            && request.auth.uid != existing().hostUid
+            && incoming().guestUid == request.auth.uid
+            && incoming().guestName.size() >= 1
+            && isValidAvatar(incoming().guestAvatar)
+            && incoming().diff(existing()).affectedKeys().hasOnly(['guestUid', 'guestName', 'guestAvatar', 'updatedAt'])
+          )
+          ||
+          // Action 1B: Quick Match opponent claims open room and launches random-mode countdown atomically
+          (
+            existing().kind == 'quick'
+            && existing().status == 'lobby'
+            && existing().guestUid == ''
+            && request.auth.uid != existing().hostUid
+            && incoming().guestUid == request.auth.uid
+            && incoming().guestName.size() >= 1
+            && isValidAvatar(incoming().guestAvatar)
+            && incoming().status == 'starting'
+            && incoming().wasRandomMode == true
+            && incoming().startedAtMs > 0
+            && incoming().endsAtMs > incoming().startedAtMs
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'guestUid', 'guestName', 'guestAvatar',
+              'modeId', 'wasRandomMode', 'deckSeed',
+              'status', 'startedAtMs', 'endsAtMs', 'updatedAt'
+            ])
+          )
+          ||
+          // Action 2: Host selects battle mode & duration in Friend Room lobby
+          (
+            existing().kind == 'friend'
+            && existing().status == 'lobby'
+            && request.auth.uid == existing().hostUid
+            && incoming().diff(existing()).affectedKeys().hasOnly(['modeId', 'wasRandomMode', 'durationSeconds', 'updatedAt'])
+          )
+          ||
+          // Action 3: Host starts Friend Room once friend has joined
+          (
+            existing().kind == 'friend'
+            && existing().status == 'lobby'
+            && existing().guestUid != ''
+            && request.auth.uid == existing().hostUid
+            && incoming().status == 'starting'
+            && incoming().startedAtMs > 0
+            && incoming().endsAtMs > incoming().startedAtMs
+            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'deckSeed', 'startedAtMs', 'endsAtMs', 'updatedAt'])
+          )
+          ||
+          // Action 4: Guest leaves Friend Room lobby before start
+          (
+            existing().kind == 'friend'
+            && existing().status == 'lobby'
+            && existing().guestUid == request.auth.uid
+            && incoming().guestUid == ''
+            && incoming().guestName == ''
+            && incoming().guestAvatar == ''
+            && incoming().diff(existing()).affectedKeys().hasOnly(['guestUid', 'guestName', 'guestAvatar', 'updatedAt'])
+          )
+          ||
+          // Action 5: Either participant transitions countdown (starting) -> live play (playing)
+          (
+            existing().status == 'starting'
+            && isRoomParticipant(existing())
+            && incoming().status == 'playing'
+            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+          )
+          ||
+          // Action 6A: Host updates ONLY host score/progress fields during live play (bounded per question)
+          (
+            existing().status == 'playing'
+            && request.auth.uid == existing().hostUid
+            && incoming().hostAnswered >= existing().hostAnswered
+            && incoming().hostAnswered <= existing().hostAnswered + 1
+            && incoming().hostQuestionIndex >= existing().hostQuestionIndex
+            && incoming().hostQuestionIndex <= existing().hostQuestionIndex + 1
+            && incoming().hostScore >= existing().hostScore
+            && incoming().hostScore <= existing().hostScore + 260
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'hostScore', 'hostCorrect', 'hostAnswered', 'hostStreak', 'hostBestStreak', 'hostQuestionIndex', 'updatedAt'
+            ])
+          )
+          ||
+          // Action 6B: Guest updates ONLY guest score/progress fields during live play (bounded per question)
+          (
+            existing().status == 'playing'
+            && request.auth.uid == existing().guestUid
+            && incoming().guestAnswered >= existing().guestAnswered
+            && incoming().guestAnswered <= existing().guestAnswered + 1
+            && incoming().guestQuestionIndex >= existing().guestQuestionIndex
+            && incoming().guestQuestionIndex <= existing().guestQuestionIndex + 1
+            && incoming().guestScore >= existing().guestScore
+            && incoming().guestScore <= existing().guestScore + 260
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'guestScore', 'guestCorrect', 'guestAnswered', 'guestStreak', 'guestBestStreak', 'guestQuestionIndex', 'updatedAt'
+            ])
+          )
+          ||
+          // Action 7: Either participant finalizes match into locked finished state with verified winner integrity
+          (
+            existing().status in ['starting', 'playing']
+            && isRoomParticipant(existing())
+            && incoming().status == 'finished'
+            && isValidWinnerForFinish()
+            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'winnerUid', 'finishReason', 'updatedAt'])
+          )
+        );
+
+      // Delete: Host may delete an unstarted lobby room when cancelling search or closing lobby
+      allow delete: if isVerifiedUser()
+        && isValidId(roomId)
+        && existing().hostUid == request.auth.uid
+        && existing().status == 'lobby';
+    }
+  }
+}
